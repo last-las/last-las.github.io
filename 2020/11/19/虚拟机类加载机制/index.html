@@ -1,0 +1,435 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#202020"/>
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  <script src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js" async></script>
+  
+  
+    <meta name="keywords" content="jvm," />
+  
+
+  
+    <meta name="description" content="虚拟机类加载机制" />
+  
+  
+  <link rel="icon" type="image/x-icon" href="/logo.png">
+  <title>虚拟机类加载机制 [ las ]</title>
+  
+    <!-- stylesheets list from config.yml -->
+    
+      <link rel="stylesheet" href="//cdn.bootcss.com/pure/1.0.0/pure-min.css">
+    
+      <link rel="stylesheet" href="/css/xoxo.css">
+    
+  
+<meta name="generator" content="Hexo 5.2.0"></head>
+
+
+<body>
+  <div class="nav-container">
+    <nav class="home-menu pure-menu pure-menu-horizontal">
+  <a class="pure-menu-heading" href="/">
+    <img class="avatar" src="http://localhost:4000/images/logo.png">
+    <span class="title">las</span>
+  </a>
+
+  <ul class="pure-menu-list clearfix">
+      
+          
+            <li class="pure-menu-item"><a href="/" class="pure-menu-link">Home</a></li>
+          
+      
+          
+            <li class="pure-menu-item"><a href="/archives" class="pure-menu-link">Archives</a></li>
+          
+      
+          
+            <li class="pure-menu-item"><a href="/tags" class="pure-menu-link">Tags</a></li>
+          
+      
+          
+            <li class="pure-menu-item"><a href="/categories" class="pure-menu-link">Categories</a></li>
+          
+      
+          
+            <li class="pure-menu-item"><a href="/about" class="pure-menu-link">About</a></li>
+          
+      
+  </ul>
+   
+</nav>
+  </div>
+
+  <div class="container" id="content-outer">
+    <div class="inner" id="content-inner">
+      <div class="post-container">
+  <article class="post" id="post">
+    <header class="post-header text-center">
+      <h1 class="title">
+        虚拟机类加载机制
+      </h1>
+      <span>
+        
+        <time class="time" datetime="2020-11-19T10:20:34.000Z">
+        2020-11-19
+      </time>
+        
+      </span>
+      <span class="slash">/</span>
+      <span class="post-meta">
+      <span class="post-tags">
+        <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/jvm/" rel="tag">jvm</a></li></ul>
+      </span>
+    </span>
+      <span class="slash">/</span>
+      <span class="read">
+      <span id="busuanzi_value_page_pv"></span> 点击
+    </span>
+      <span class="slash">/</span>
+      <span class="read">阅读耗时 19 分钟</span>
+    </header>
+
+    <div class="post-content">
+      <blockquote>
+<p>《深入理解java虚拟机》笔记。</p>
+</blockquote>
+<h1 id="类加载"><a href="#类加载" class="headerlink" title="类加载"></a>类加载</h1><h2 id="加载流程概述"><a href="#加载流程概述" class="headerlink" title="加载流程概述"></a>加载流程概述</h2><p>下图为类加载的流程，前后顺序仅仅表示<strong>开始的时机</strong>。即会在一个阶段执行的过程中调用、激活另一个阶段：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201104200705285.png" alt="img"></p>
+<h3 id="类初始化时机"><a href="#类初始化时机" class="headerlink" title="类初始化时机"></a>类初始化时机</h3><p>关于何时开始类加载过程的第一个阶段“加载”没有强制约束，由虚拟机自己实现。</p>
+<p>但是对于<strong>初始化</strong>阶段，《Java虚拟机规范》则严格规定了<strong>有且只有</strong>六种情况必须立即对类进行“初始化”（而加载、验证、准备、解析自然需在此之前开始）：</p>
+<ol>
+<li><p>遇到<strong>new</strong>、<strong>getstatic</strong>、<strong>putstatic</strong>或<strong>invokestatic</strong>四条指令时，若类型没有初始化，则需要先触发其初始化阶段。产生这些指令的场景如下：</p>
+<ul>
+<li>使用new关键字实例化对象。</li>
+<li>读取或设置一个类型的静态字段（被final修饰的已被放入常量池的字段除外）时。</li>
+<li>调用一个类型的静态方法时。</li>
+</ul>
+</li>
+<li><p>使用<code>java.lang.reflect</code>包的方法对类型进行反射调用时，如果类型没有进行过初始化，则需要先触发其初始化。</p>
+</li>
+<li><p>当初始化类时，如果发现其父类还没有进行过初始化，则需要先触发其父类的初始化。</p>
+<blockquote>
+<p>这里，当一个接口在初始化时，并不要求其父接口全部都完成初始化。只有在真正使用到父接口的时候（如引用接口中定义的常量）才会初始化。</p>
+</blockquote>
+</li>
+<li><p>当虚拟机启动时，用户需要指定一个要执行的主类（包含<code>main()</code>方法的类），虚拟机会先初始化这个主类。</p>
+</li>
+<li><p>当使用JDK7新加入的动态语言支持时，如果一个<strong>java.lang.invoke.MethodHandle</strong>实例最后的解析结果为<strong>REF_getStatic</strong>、<strong>REF_putStatic</strong>、<strong>REF_invokeStatic</strong>、<strong>REF_newInvokeSpecial</strong>四种类型的方法句柄，并且这个方法句柄对应的类没有进行过初始化，则需要先触发其初始化。</p>
+</li>
+<li><p>当一个接口中定义了<strong>JDK 8</strong>新加入的默认方法（default），如果有这个接口的实现类发生了初始化，则该接口要在其之前被初始化。</p>
+</li>
+</ol>
+<h3 id="关于被动引用"><a href="#关于被动引用" class="headerlink" title="关于被动引用"></a>关于被动引用</h3><p>书中给出三个示例，这里不做详解，仅列出示例：</p>
+<ol>
+<li><p>对于静态字段，只有直接定义该字段的类才会被初始化。</p>
+<p>因此通过其子类来引用父类中定义的静态字段，只会触发父类的初始化而不会触发子类的初始化。</p>
+</li>
+<li><p>创建某个对象的数组时，不会初始化这个对象。</p>
+<p>如<code>SuperClass[] sca = new SuperClass[10]</code></p>
+</li>
+<li><p>第三个就是<code>final static</code>惹。</p>
+</li>
+</ol>
+<h2 id="类加载的过程"><a href="#类加载的过程" class="headerlink" title="类加载的过程"></a>类加载的过程</h2><h3 id="1-加载"><a href="#1-加载" class="headerlink" title="1. 加载"></a>1. 加载</h3><p>加载阶段，Java虚拟机要完成以下三件事情：</p>
+<ol>
+<li>通过一个类的全限定名来获取定义此类的二进制字节流。</li>
+<li>将这个字节流所代表的静态存储结构转化为方法区的运行时数据结构。</li>
+<li>在堆内存中生成一个代表该类的<code>java.lang.Class</code>对象，作为方法区这个类的各种数据的访问入口。</li>
+</ol>
+<p>这里，《规范》没有指定字节流必须从某个class文件中获取，因此玩出了各种花，有下面这些获得方式：</p>
+<ul>
+<li>从ZIP压缩包中获取，即JAR、EAR、WAR格式。</li>
+<li>从网络中获取</li>
+<li>动态代理</li>
+<li>数据库</li>
+<li><strong>…</strong></li>
+</ul>
+<h3 id="2-验证"><a href="#2-验证" class="headerlink" title="2. 验证"></a>2. 验证</h3><p>验证阶段的目的是确保Class文件的字节流中包含的信息符合《规范》的全部约束要求，保证这些信息被当作代码运行后不会危害虚拟机自身的安全。</p>
+<p>验证阶段大致上会完成下面四个阶段的检验动作：</p>
+<ol>
+<li><p>文件格式验证。</p>
+<p>即验证字节流是否符合Class文件规范，如魔数、版本、是否错误指向了常量池中的常量等。</p>
+<p>通过该阶段的验证之后，这段字节流才被允许进入Java虚拟机内存的方法区存储，所以之后的验证都是基于方法区的存储结构进行的。</p>
+</li>
+<li><p>元数据验证。</p>
+<p>对字节码描述的信息进行语义分析，以保证其描述的信息符合《规范》要求。</p>
+<p>比如：</p>
+<ul>
+<li>这个类是否有父类</li>
+<li>这个类的父类是否继承了不允许被继承的类。</li>
+<li>若该类不是抽象类，它是否实现了接口和父类中要求实现的所有方法。</li>
+</ul>
+</li>
+<li><p>字节码验证。</p>
+<p>该阶段是对类的方法体（Class文件中的Code属性）进行校验分析，保证被校验类的方法在运行时不会做出危害虚拟机安全的行为，如：</p>
+<ul>
+<li>保证任意时刻操作数栈的数据类型与指令代码序列都能配合工作，如不会出现“栈顶是一个int数据，使用时却按long类型来加载入本地变量表中”的情况。</li>
+<li>保证任何跳转指令都不会跳转到方法体以外的字节码指令上。</li>
+<li>保证方法体中的类型转换总是有效的。</li>
+<li><strong>……</strong></li>
+</ul>
+</li>
+<li><p>符号引用验证。</p>
+<p>符号引用的目的是<strong>确保解析行为能正常执行。</strong></p>
+<p>该验证阶段在执行<strong>解析阶段</strong>时发生。通俗来说，是验证该类是否缺少或者被禁止访问它依赖的某些外部类、方法、字段等资源。本阶段需要校验下述内容：</p>
+<ul>
+<li>符号引用中通过字符串描述的全限定名是否能找到对应的类。</li>
+<li>在指定类中是否存在符合方法的字段描述符及简单名称所描述的方法和字段。</li>
+<li>符号引用中的类、字段、方法的可访问性（private、protected…）是否可被当前类访问。</li>
+<li><strong>……</strong></li>
+</ul>
+</li>
+</ol>
+<h3 id="3-准备"><a href="#3-准备" class="headerlink" title="3. 准备"></a>3. 准备</h3><p>准备阶段是在方法区上，为类中定义的变量（即被static修饰的变量）分配内存并设置初始值（0）的阶段。</p>
+<p>一些注意点：</p>
+<ul>
+<li>对于实例变量，它们会在对象实例化时在java堆中分配。</li>
+<li>假设一个类变量定义如下：<code>public static int value=123;</code>则准备阶段后<code>value</code>为0，而将其赋值为123则是在<code>&lt;clinit&gt;()</code>方法中执行。</li>
+<li>对于被<code>final</code>和<code>static</code>修饰的变量，准备阶段虚拟机就会将其值设置为123。</li>
+</ul>
+<h3 id="4-解析"><a href="#4-解析" class="headerlink" title="4. 解析"></a>4. 解析</h3><p>解析阶段是在Java虚拟机将常量池内的符号引用替换为直接引用的过程。</p>
+<ul>
+<li>符号引用以一组符号来描述所引用的目标，其实就是class文件中的<code>CONSTANT_Class_info</code>、<code>CONSTANT_Fieldref_info</code>等数据结构。</li>
+<li>直接引用则是可以直接执行目标的指针、相对偏移量或是一个能间接定位目标的句柄。</li>
+</ul>
+<h3 id="5-初始化"><a href="#5-初始化" class="headerlink" title="5. 初始化"></a>5. 初始化</h3><p>初始化阶段就是执行类构造器<code>&lt;clinit&gt;()</code>方法的过程。</p>
+<p><code>&lt;clinit&gt;()</code>不是程序员在Java代码中直接编写的方法，它是Javac编译器的自动生成物。</p>
+<p>关于<code>&lt;clinit&gt;()</code>更多的注意事项：</p>
+<ul>
+<li><p><code>&lt;clinit&gt;()</code>方法是由编译器自动收集类中的所有类变量的赋值动作和静态语句块（static{}块）中的语句产生的。其收集顺序是由语句在源文件中出现的顺序决定的。</p>
+</li>
+<li><p>静态语句块中只能访问到定义在静态语句块之前的变量，定义在它之后的变量，只能在前面的静态语句块赋值，而不能访问：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">Test</span> </span>&#123;</span><br><span class="line">	<span class="keyword">static</span>&#123;</span><br><span class="line">		i = <span class="number">0</span>;	<span class="comment">// 可通过</span></span><br><span class="line">		System.out.print(i);  <span class="comment">// 编译器提示 “非法向前引用”</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">static</span> <span class="keyword">int</span> i = <span class="number">1</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+</li>
+<li><p>Java虚拟机会保证在子类的<code>&lt;clinit&gt;()</code>方法执行前，父类的<code>&lt;clinit&gt;()</code>方法已经执行完毕，这意味着父类中定义的静态语句块先于子类。</p>
+<p>所以在Java虚拟机中第一个被执行的<code>&lt;clinit&gt;()</code>方法的类型肯定是<code>java.lang.Object</code>。</p>
+</li>
+<li><p>如果一个类中没有静态语句块和赋值操作，那么编译器可以不为它生成<code>&lt;clinit&gt;()</code>方法。</p>
+</li>
+<li><p>执行接口的<code>&lt;clinit&gt;()</code>方法不需要先执行父接口的<code>&lt;clinit&gt;()</code>方法，因为只有当父接口中定义的变量被使用时，父接口才会被初始化。</p>
+</li>
+<li><p>如果多个线程同时去初始化一个类，那么只有其中一个线程会执行<code>&lt;clinit&gt;()</code>方法，其它线程都会阻塞。</p>
+</li>
+</ul>
+<h2 id="类加载器"><a href="#类加载器" class="headerlink" title="类加载器"></a>类加载器</h2><p>类加载器只用于实现类的加载操作，但它在Java程序中起到的作用远超类加载阶段。</p>
+<h3 id="类”相等”条件"><a href="#类”相等”条件" class="headerlink" title="类”相等”条件"></a>类”相等”条件</h3><p>对于任意一个类，都必须由加载它的类加载器和这个类本身一起共同确立其在Java虚拟机中的唯一性。</p>
+<p>比较两个类是否“相等”，只有在这两个类是由同一个类加载器加载的前提下才有意义。</p>
+<p>这里的相等是指<code>equals()</code>、<code>isAssignableFrom()</code>、<code>isInstance()</code>方法。</p>
+<h3 id="双亲委派模型"><a href="#双亲委派模型" class="headerlink" title="双亲委派模型"></a>双亲委派模型</h3><p>首先介绍三个系统提供的类加载器：</p>
+<ul>
+<li><p><strong>Bootstrap Class Loader</strong>：它负责加载存放在<strong>&lt;JAVA_HOME&gt;\lib</strong>目录，或者被**-Xbootclasspath**参数所指定的路径中存放的，而且必须是Java虚拟机能够识别的（按照文件名识别，如rt.jar、tools.jar，名字不符合的类库是不会被加载的）。</p>
+<p>一般只有它是由C语言编写的。</p>
+</li>
+<li><p><strong>Extension Class Loader</strong>：它负责加载<strong>&lt;JAVA_HOME&gt;\lib\ext</strong>目录，或被<strong>java.ext.dirs</strong>系统变量所指定的路径中所有的类库。它一般可让用户自己扩展通用性的类库。</p>
+</li>
+<li><p><strong>Application Class Loader</strong>：是<code>ClassLoader.getSystemClassLoader()</code>方法的返回值，有时被叫做“系统类加载器”。它负责加载用户类路径（ClassPath）上所有的类库。</p>
+</li>
+</ul>
+<hr>
+<p>双亲委派模型是指，除了<strong>Bootstrap Class Loader</strong>之外，其余的类加载器都应有自己的父类加载器。不过这个“父类”关系一般不是通过继承来实现的，而是使用组合关系来复用父加载器的代码。如下图所示：</p>
+<img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201104233158972.png" alt="img" style="zoom:67%;" />
+
+<p>双亲委派模型的工作过程是：如果一个类加载器收到了类加载的请求，它首先不会自己去尝试加载这个类，而是把这个请求委派给父类加载器去完成，每一个层次的类加载器都是如此，因此所有的加载请求最终都应该传送到最顶层的启动类加载器中，只有当父加载器反馈自己无法完成这个加载请求（它的搜索范围中没有找到所需的类）时，子加载器才会尝试自己去完成加载。</p>
+<hr>
+<p>关于该模型的好处：</p>
+<p>举个例子，用户定义了恶意的同名类<code>java.lang.Object</code>放在ClassPath下，由于双亲委派模型的存在，不管使用什么加载器，它最终都会先用<strong>bootstrap class loader</strong>加载位于rt.jar中的<code>java.lang.Object</code>，所以永远都无法去加载恶意的同名类。</p>
+<hr>
+<p>双亲委派模型的实现：</p>
+<p><img src="https://gitee.com/Lieutenantas/md-pic/raw/master/image-20201104234256594.png" alt="image-20201104234256594"></p>
+<h3 id="破坏双亲委派模型"><a href="#破坏双亲委派模型" class="headerlink" title="破坏双亲委派模型"></a>破坏双亲委派模型</h3><p><strong>JNDI</strong>服务：<a target="_blank" rel="noopener" href="https://blog.csdn.net/justloveyou_/article/details/72231425">https://blog.csdn.net/justloveyou_/article/details/72231425</a></p>
+
+    </div>
+
+    <div>全文完。</div>
+  </article>
+  <div class="toc-container">
+    
+  <div id="toc" class="toc-article">
+    <strong class="toc-title">Posts</strong>
+    <ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#%E7%B1%BB%E5%8A%A0%E8%BD%BD"><span class="toc-text">类加载</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8A%A0%E8%BD%BD%E6%B5%81%E7%A8%8B%E6%A6%82%E8%BF%B0"><span class="toc-text">加载流程概述</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%B1%BB%E5%88%9D%E5%A7%8B%E5%8C%96%E6%97%B6%E6%9C%BA"><span class="toc-text">类初始化时机</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%85%B3%E4%BA%8E%E8%A2%AB%E5%8A%A8%E5%BC%95%E7%94%A8"><span class="toc-text">关于被动引用</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%B1%BB%E5%8A%A0%E8%BD%BD%E7%9A%84%E8%BF%87%E7%A8%8B"><span class="toc-text">类加载的过程</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-%E5%8A%A0%E8%BD%BD"><span class="toc-text">1. 加载</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-%E9%AA%8C%E8%AF%81"><span class="toc-text">2. 验证</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-%E5%87%86%E5%A4%87"><span class="toc-text">3. 准备</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-%E8%A7%A3%E6%9E%90"><span class="toc-text">4. 解析</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-%E5%88%9D%E5%A7%8B%E5%8C%96"><span class="toc-text">5. 初始化</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E7%B1%BB%E5%8A%A0%E8%BD%BD%E5%99%A8"><span class="toc-text">类加载器</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%B1%BB%E2%80%9D%E7%9B%B8%E7%AD%89%E2%80%9D%E6%9D%A1%E4%BB%B6"><span class="toc-text">类”相等”条件</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%8F%8C%E4%BA%B2%E5%A7%94%E6%B4%BE%E6%A8%A1%E5%9E%8B"><span class="toc-text">双亲委派模型</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E7%A0%B4%E5%9D%8F%E5%8F%8C%E4%BA%B2%E5%A7%94%E6%B4%BE%E6%A8%A1%E5%9E%8B"><span class="toc-text">破坏双亲委派模型</span></a></li></ol></li></ol></li></ol>
+  </div>
+
+
+  </div>
+</div>
+<div class="copyright">
+</div>
+<div class="share" style="width: 100%;">
+</div>
+
+  
+    <div class="post-nav">
+      <div class="post-nav-item post-nav-next">
+        
+          <span>〈 </span>
+          <a href="/2020/11/15/java%E5%86%85%E5%AD%98%E7%BB%93%E6%9E%84/" rel="next" title="java内存结构">
+          java内存结构
+          </a>
+        
+      </div>
+  
+      <div class="post-nav-item post-nav-prev">
+          
+          <a href="/2020/12/02/weblogic%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E6%BC%8F%E6%B4%9E%E5%A4%8D%E7%8E%B0/" rel="prev" title="weblogic反序列化漏洞复现">
+            weblogic反序列化漏洞复现
+          </a>
+          <span>〉</span>
+        
+      </div>
+    </div>
+  
+
+
+    </div>
+
+    
+
+  </div>
+  <footer class="footer text-center">
+    <div id="bottom-inner">
+        <a class="bottom-item" target="_blank" rel="noopener" href="https://blog.0xff000000.com">首页</a> |
+        <a class="bottom-item" href="https://0xff000000.com" target="_blank">主站</a> |
+        <a class="bottom-item" href="https://github.com/KevinOfNeu" target="_blank">GitHub</a> |
+        <a class="bottom-item" href="https://hexo.io" target="_blank">Powered by hexo</a> |
+        <a class="bottom-item" href="https://github.com/KevinOfNeu/hexo-theme-xoxo" target="_blank">Theme xoxo</a>
+    </div>
+</footer>
+  
+
+<script>
+  (function(window, document, undefined) {
+
+    var timer = null;
+
+    function returnTop() {
+      cancelAnimationFrame(timer);
+      timer = requestAnimationFrame(function fn() {
+        var oTop = document.body.scrollTop || document.documentElement.scrollTop;
+        if (oTop > 0) {
+          document.body.scrollTop = document.documentElement.scrollTop = oTop - 50;
+          timer = requestAnimationFrame(fn);
+        } else {
+          cancelAnimationFrame(timer);
+        }
+      });
+    }
+
+    var hearts = [];
+    window.requestAnimationFrame = (function() {
+      return window.requestAnimationFrame ||
+        window.webkitRequestAnimationFrame ||
+        window.mozRequestAnimationFrame ||
+        window.oRequestAnimationFrame ||
+        window.msRequestAnimationFrame ||
+        function(callback) {
+          setTimeout(callback, 1000 / 60);
+        }
+    })();
+    init();
+
+    function init() {
+      css(".heart{z-index:9999;width: 10px;height: 10px;position: fixed;background: #f00;transform: rotate(45deg);-webkit-transform: rotate(45deg);-moz-transform: rotate(45deg);}.heart:after,.heart:before{content: '';width: inherit;height: inherit;background: inherit;border-radius: 50%;-webkit-border-radius: 50%;-moz-border-radius: 50%;position: absolute;}.heart:after{top: -5px;}.heart:before{left: -5px;}");
+      attachEvent();
+      gameloop();
+      addMenuEvent();
+    }
+
+    function gameloop() {
+      for (var i = 0; i < hearts.length; i++) {
+        if (hearts[i].alpha <= 0) {
+          document.body.removeChild(hearts[i].el);
+          hearts.splice(i, 1);
+          continue;
+        }
+        hearts[i].y--;
+        hearts[i].scale += 0.004;
+        hearts[i].alpha -= 0.013;
+        hearts[i].el.style.cssText = "left:" + hearts[i].x + "px;top:" + hearts[i].y + "px;opacity:" + hearts[i].alpha + ";transform:scale(" + hearts[i].scale + "," + hearts[i].scale + ") rotate(45deg);background:" + hearts[i].color;
+      }
+      requestAnimationFrame(gameloop);
+    }
+
+    /**
+     * 给logo设置点击事件
+     * 
+     * - 回到顶部
+     * - 出现爱心
+     */
+    function attachEvent() {
+      var old = typeof window.onclick === "function" && window.onclick;
+      var logo = document.getElementById("logo");
+      if (logo) {
+        logo.onclick = function(event) {
+          returnTop();
+          old && old();
+          createHeart(event);
+        }
+      }
+      
+    }
+
+    function createHeart(event) {
+      var d = document.createElement("div");
+      d.className = "heart";
+      hearts.push({
+        el: d,
+        x: event.clientX - 5,
+        y: event.clientY - 5,
+        scale: 1,
+        alpha: 1,
+        color: randomColor()
+      });
+      document.body.appendChild(d);
+    }
+
+    function css(css) {
+      var style = document.createElement("style");
+      style.type = "text/css";
+      try {
+        style.appendChild(document.createTextNode(css));
+      } catch (ex) {
+        style.styleSheet.cssText = css;
+      }
+      document.getElementsByTagName('head')[0].appendChild(style);
+    }
+
+    function randomColor() {
+      // return "rgb(" + (~~(Math.random() * 255)) + "," + (~~(Math.random() * 255)) + "," + (~~(Math.random() * 255)) + ")";
+      return "#F44336";
+    }
+
+    function addMenuEvent() {
+      var menu = document.getElementById('menu-main-post');
+      if (menu) {
+        var toc = document.getElementById('toc');
+        if (toc) {
+          menu.onclick = function() {
+            if (toc) {
+              if (toc.style.display == 'block') {
+                toc.style.display = 'none';
+              } else {
+                toc.style.display = 'block';
+              }
+            }
+          };
+        } else {
+          menu.style.display = 'none';
+        }
+      }
+    }
+
+  })(window, document);
+</script>
+
+  
+
+
+
+</body>
+</html>
